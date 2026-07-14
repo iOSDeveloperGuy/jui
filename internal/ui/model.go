@@ -161,15 +161,22 @@ func (a *App) execute(recipe justfile.Recipe) {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Run()
 	duration := time.Since(start).Round(time.Millisecond)
+	failed := false
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		a.status = fmt.Sprintf("%s failed with exit code %d after %s", recipe.Name, exitErr.ExitCode(), duration)
+		failed = true
 	} else if err != nil {
 		a.status = fmt.Sprintf("%s failed: %v", recipe.Name, err)
+		failed = true
 	} else {
 		a.status = fmt.Sprintf("%s completed in %s", recipe.Name, duration)
 	}
-	fmt.Printf("\n%s\nPress Enter to return to jui...", a.status)
-	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+
+	fmt.Printf("\n%s\n", a.status)
+	if failed {
+		fmt.Print("Press Enter to return to jui...")
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	}
 	_, _ = rawMode()
 	enterAlternateScreen()
 }
