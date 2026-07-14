@@ -2,24 +2,23 @@
 
 A focused terminal interface for discovering and running [`just`](https://just.systems) recipes.
 
-`jui` finds the nearest `justfile`, lists documented recipes, supports keyboard search and selection, prompts for recipe arguments, and runs the chosen command without forcing you to memorize every recipe name.
+`jui` finds the nearest `justfile`, lists documented recipes, supports fuzzy search and keyboard selection, and runs the chosen recipe without forcing you to memorize every command.
 
 ## Features
 
 - Finds the nearest `justfile` by walking up from the current directory
 - Lists recipes and descriptions from comments
-- Filters recipes as you type
-- Supports arrow keys, `j`/`k`, Enter, Escape, and `q`
-- Prompts for required positional arguments
+- Fuzzy-filters recipe names and descriptions
+- Supports arrow-key navigation
 - Streams the selected recipe's output
 - Reports exit status and execution duration
 - Uses only the Go standard library at runtime
 
 ## Requirements
 
-- Go 1.24 or newer to build from source
+- Go 1.23.2 or newer to build from source
 - [`just`](https://just.systems) installed and available on `PATH`
-- An ANSI-compatible terminal
+- `stty` and an ANSI-compatible terminal
 
 ## Install
 
@@ -37,10 +36,10 @@ From a directory containing a `justfile`, or any child directory:
 jui
 ```
 
-Start with a search already entered:
+Check the installed version:
 
 ```sh
-jui test
+jui --version
 ```
 
 ## Justfile descriptions
@@ -61,15 +60,13 @@ test:
 
 | Key | Action |
 | --- | --- |
-| Type | Filter recipes |
-| Up / `Ctrl-P` | Previous recipe |
-| Down / `Ctrl-N` | Next recipe |
+| `/` | Open search |
+| Up | Previous recipe |
+| Down | Next recipe |
 | Enter | Run selected recipe |
-| Backspace | Remove search character |
-| Escape | Clear search |
+| Escape | Cancel and clear search |
+| `q` | Quit when not searching |
 | `Ctrl-C` | Quit |
-
-When the search field is empty, `j` and `k` also move through the list and `q` quits.
 
 ## Development
 
