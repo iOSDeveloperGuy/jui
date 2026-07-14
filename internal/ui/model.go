@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	selectedRowWidth  = 96
+	selectedRowWidth   = 96
 	minNameColumnWidth = 24
 	maxNameColumnWidth = 40
 	rowPrefixWidth     = 3
@@ -34,6 +34,7 @@ type App struct {
 	recipes  []justfile.Recipe
 	visible  []justfile.Recipe
 	selected int
+	offset   int
 	query    string
 	status   string
 	results  map[string]runResult
@@ -148,13 +149,14 @@ func (a *App) clearQuery() {
 func (a *App) filter() {
 	q := strings.ToLower(strings.TrimSpace(a.query))
 	a.visible = a.visible[:0]
-	for _, r := range a.recipes {
-		haystack := strings.ToLower(r.Name + " " + r.Description)
+	for _, recipe := range a.recipes {
+		haystack := strings.ToLower(recipe.Name + " " + recipe.Description)
 		if fuzzyContains(haystack, q) {
-			a.visible = append(a.visible, r)
+			a.visible = append(a.visible, recipe)
 		}
 	}
 	a.selected = 0
+	a.offset = 0
 }
 
 func fuzzyContains(value, query string) bool {
@@ -207,43 +209,64 @@ func (a *App) execute(recipe justfile.Recipe) {
 }
 
 func (a *App) render() {
-	fmt.Print("\x1b[2J\x1b[H")
-	fmt.Printf("\x1b[1;36mjui\x1b[0m  \x1b[2m%s\x1b[0m\n", a.path)
+	rows, columns := terminalDimensions()
+	rowWidth := rowWidthForTerminal(columns)
+	capacity := recipeViewportCapacity(rows)
+	start, end := viewportRange(len(a.visible), a.selected, a.offset, capacity)
+	a.offset = start
 
-	if a.query == "" {
-		fmt.Print("\x1b[2mSearch: type to filter recipes\x1b[0m\n\n")
-	} else {
-		fmt.Printf("\x1b[1mSearch: %s_\x1b[0m\n\n", a.query)
+	fmt.Print("\x1b[2J\x1b[H")
+	pathWidth := rowWidth - len("jui  ")
+	if pathWidth < 0 {
+		pathWidth = 0
 	}
+	fmt.Printf("\x1b[1;36mjui\x1b[0m  \x1b[2m%s\x1b[0m\n", truncateText(a.path, pathWidth))
+
+	search := "Search: type to filter recipes"
+	if a.query != "" {
+		search = "Search: " + a.query + "_"
+	}
+	fmt.Printf("\x1b[2m%s\x1b[0m\n\n", truncateText(search, rowWidth))
 
 	if len(a.visible) == 0 {
-		fmt.Println("  No matching recipes")
-	}
-
-	nameWidth := recipeNameColumnWidth(a.visible)
-	for i, recipe := range a.visible {
-		marker := resultMarker(a.results[recipe.Name])
-		name := truncateText(recipe.Name, nameWidth)
-		description := recipe.Description
-		if description == "" {
-			description = "No description"
+		fmt.Println(truncateText("  No matching recipes", rowWidth))
+	} else {
+		visibleRecipes := a.visible[start:end]
+		nameWidth := fitNameColumnWidth(a.visible, rowWidth)
+		descriptionWidth := rowWidth - rowPrefixWidth - nameWidth - rowGapWidth
+		if descriptionWidth < 0 {
+			descriptionWidth = 0
 		}
 
-		descriptionWidth := selectedRowWidth - rowPrefixWidth - nameWidth - rowGapWidth
-		description = truncateText(description, descriptionWidth)
-		row := fmt.Sprintf(" %s %-*s  %s", marker, nameWidth, name, description)
+		for index, recipe := range visibleRecipes {
+			absoluteIndex := start + index
+			marker := resultMarker(a.results[recipe.Name])
+			name := truncateText(recipe.Name, nameWidth)
+			description := recipe.Description
+			if description == "" {
+				description = "No description"
+			}
+			description = truncateText(description, descriptionWidth)
 
-		if i == a.selected {
-			fmt.Printf("\x1b[1;7m%-*s\x1b[0m\n", selectedRowWidth, row)
-			continue
+			row := " " + marker + " " + padText(name, nameWidth) + "  " + padText(description, descriptionWidth)
+			row = padText(truncateText(row, rowWidth), rowWidth)
+			if absoluteIndex == a.selected {
+				fmt.Printf("\x1b[1;7m%s\x1b[0m\n", row)
+				continue
+			}
+
+			fmt.Print(" ")
+			renderResultMarker(a.results[recipe.Name])
+			fmt.Print(" ")
+			fmt.Printf("\x1b[36m%s\x1b[0m  \x1b[2m%s\x1b[0m\n", padText(name, nameWidth), padText(description, descriptionWidth))
 		}
-
-		fmt.Print(" ")
-		renderResultMarker(a.results[recipe.Name])
-		fmt.Print(" ")
-		fmt.Printf("\x1b[36m%-*s\x1b[0m  \x1b[2m%s\x1b[0m\n", nameWidth, name, description)
 	}
-	fmt.Printf("\n\x1b[2m%s\x1b[0m", a.status)
+
+	footer := a.status
+	if len(a.visible) > capacity {
+		footer += fmt.Sprintf("  %d-%d/%d", start+1, end, len(a.visible))
+	}
+	fmt.Printf("\n\x1b[2m%s\x1b[0m", truncateText(footer, rowWidth))
 }
 
 func recipeNameColumnWidth(recipes []justfile.Recipe) int {
@@ -271,6 +294,15 @@ func truncateText(value string, width int) string {
 		return "…"
 	}
 	return string(runes[:width-1]) + "…"
+}
+
+func padText(value string, width int) string {
+	value = truncateText(value, width)
+	padding := width - utf8.RuneCountInString(value)
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
 }
 
 func resultMarker(result runResult) string {
