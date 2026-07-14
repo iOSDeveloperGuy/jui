@@ -7,11 +7,18 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/iOSDeveloperGuy/jui/internal/justfile"
 )
 
-const selectedRowWidth = 96
+const (
+	selectedRowWidth  = 96
+	minNameColumnWidth = 24
+	maxNameColumnWidth = 40
+	rowPrefixWidth     = 3
+	rowGapWidth        = 2
+)
 
 type runResult int
 
@@ -212,40 +219,84 @@ func (a *App) render() {
 	if len(a.visible) == 0 {
 		fmt.Println("  No matching recipes")
 	}
-	for i, r := range a.visible {
-		desc := r.Description
-		if desc == "" {
-			desc = "No description"
+
+	nameWidth := recipeNameColumnWidth(a.visible)
+	for i, recipe := range a.visible {
+		marker := resultMarker(a.results[recipe.Name])
+		name := truncateText(recipe.Name, nameWidth)
+		description := recipe.Description
+		if description == "" {
+			description = "No description"
 		}
-		marker := " "
-		switch a.results[r.Name] {
-		case runSucceeded:
-			marker = "✓"
-		case runFailed:
-			marker = "✗"
-		case runStopped:
-			marker = "■"
-		}
-		row := fmt.Sprintf(" %s %-24s %s", marker, r.Name, desc)
-		if len(row) > selectedRowWidth {
-			row = row[:selectedRowWidth]
-		}
+
+		descriptionWidth := selectedRowWidth - rowPrefixWidth - nameWidth - rowGapWidth
+		description = truncateText(description, descriptionWidth)
+		row := fmt.Sprintf(" %s %-*s  %s", marker, nameWidth, name, description)
+
 		if i == a.selected {
-			fmt.Printf("\x1b[1;7m %-*s \x1b[0m\n", selectedRowWidth, strings.TrimSpace(row))
+			fmt.Printf("\x1b[1;7m%-*s\x1b[0m\n", selectedRowWidth, row)
 			continue
 		}
-		switch a.results[r.Name] {
-		case runSucceeded:
-			fmt.Printf(" \x1b[1;32m✓\x1b[0m %-24s %s\n", r.Name, desc)
-		case runFailed:
-			fmt.Printf(" \x1b[1;31m✗\x1b[0m %-24s %s\n", r.Name, desc)
-		case runStopped:
-			fmt.Printf(" \x1b[1;33m■\x1b[0m %-24s %s\n", r.Name, desc)
-		default:
-			fmt.Printf("   %-24s %s\n", r.Name, desc)
-		}
+
+		fmt.Print(" ")
+		renderResultMarker(a.results[recipe.Name])
+		fmt.Print(" ")
+		fmt.Printf("\x1b[36m%-*s\x1b[0m  \x1b[2m%s\x1b[0m\n", nameWidth, name, description)
 	}
 	fmt.Printf("\n\x1b[2m%s\x1b[0m", a.status)
+}
+
+func recipeNameColumnWidth(recipes []justfile.Recipe) int {
+	width := minNameColumnWidth
+	for _, recipe := range recipes {
+		if length := utf8.RuneCountInString(recipe.Name); length > width {
+			width = length
+		}
+	}
+	if width > maxNameColumnWidth {
+		return maxNameColumnWidth
+	}
+	return width
+}
+
+func truncateText(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
+}
+
+func resultMarker(result runResult) string {
+	switch result {
+	case runSucceeded:
+		return "✓"
+	case runFailed:
+		return "✗"
+	case runStopped:
+		return "■"
+	default:
+		return " "
+	}
+}
+
+func renderResultMarker(result runResult) {
+	switch result {
+	case runSucceeded:
+		fmt.Print("\x1b[1;32m✓\x1b[0m")
+	case runFailed:
+		fmt.Print("\x1b[1;31m✗\x1b[0m")
+	case runStopped:
+		fmt.Print("\x1b[1;33m■\x1b[0m")
+	default:
+		fmt.Print(" ")
+	}
 }
 
 func rawMode() (string, error) {
