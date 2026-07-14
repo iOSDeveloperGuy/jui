@@ -3,7 +3,6 @@ package ui
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -25,10 +24,10 @@ type App struct {
 
 func New(path string, recipes []justfile.Recipe) *App {
 	return &App{
-		path:     path,
-		recipes:  recipes,
-		visible:  append([]justfile.Recipe(nil), recipes...),
-		status:   "type to search  ↑/↓ select  enter run  esc clear  ctrl-c quit",
+		path:    path,
+		recipes: recipes,
+		visible: append([]justfile.Recipe(nil), recipes...),
+		status:  "type to search  ↑/↓ select  enter run  esc clear/quit  ctrl-c quit",
 	}
 }
 
@@ -57,8 +56,12 @@ func (a *App) Run() error {
 		case 3:
 			return nil
 		case 27:
-			if err := a.handleEscape(in); err != nil && err != io.EOF {
+			quit, err := a.handleEscape(in)
+			if err != nil {
 				return err
+			}
+			if quit {
+				return nil
 			}
 		case 127, 8:
 			if len(a.query) > 0 {
@@ -74,25 +77,34 @@ func (a *App) Run() error {
 	}
 }
 
-func (a *App) handleEscape(in *bufio.Reader) error {
+func (a *App) handleEscape(in *bufio.Reader) (bool, error) {
 	if in.Buffered() == 0 {
+		if a.query == "" {
+			return true, nil
+		}
 		a.clearQuery()
-		return nil
+		return false, nil
 	}
 
 	second, err := in.ReadByte()
 	if err != nil {
+		if a.query == "" {
+			return true, nil
+		}
 		a.clearQuery()
-		return nil
+		return false, nil
 	}
 	if second != '[' {
+		if a.query == "" {
+			return true, nil
+		}
 		a.clearQuery()
-		return nil
+		return false, nil
 	}
 
 	third, err := in.ReadByte()
 	if err != nil {
-		return err
+		return false, err
 	}
 	switch third {
 	case 'A':
@@ -104,7 +116,7 @@ func (a *App) handleEscape(in *bufio.Reader) error {
 			a.selected++
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func (a *App) clearQuery() {
