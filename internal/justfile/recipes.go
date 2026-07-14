@@ -20,8 +20,8 @@ type Recipe struct {
 }
 
 var (
-	// A leading @ marks a quiet recipe in just syntax. It is not part of the
-	// recipe name used when invoking the recipe.
+	// Source parsing is only used to enrich recipes with descriptions and
+	// parameters. `just --summary` is the source of truth for recipe names.
 	recipePattern = regexp.MustCompile(`^@?([A-Za-z_][A-Za-z0-9_-]*)(?:\s+([^:]+))?:\s*(?:#.*)?$`)
 	aliasPattern  = regexp.MustCompile(`^alias\s+([A-Za-z_][A-Za-z0-9_-]*)\s*:=\s*[A-Za-z_][A-Za-z0-9_-]*\s*(?:#.*)?$`)
 )
@@ -52,15 +52,64 @@ func Discover(start string) (string, error) {
 }
 
 func Parse(path string) ([]Recipe, error) {
-	f, err := os.Open(path)
+	metadata, sourceErr := parseSource(path)
+	names, listErr := listAvailableRecipes(path)
+
+	// `just` understands imports, modules, attributes, aliases, and future
+	// syntax changes better than a hand-written parser can. When available,
+	// always use its output as the authoritative recipe set.
+	if listErr == nil {
+		byName := make(map[string]Recipe, len(metadata))
+		for _, recipe := range metadata {
+			byName[recipe.Name] = recipe
+		}
+
+		recipes := make([]Recipe, 0, len(names))
+		for _, name := range names {
+			recipe, ok := byName[name]
+			if !ok {
+				recipe = Recipe{Name: name}
+			}
+			recipes = append(recipes, recipe)
+		}
+		if len(recipes) == 0 {
+			return nil, fmt.Errorf("no recipes found in %s", path)
+		}
+		return recipes, nil
+	}
+
+	// Keep source parsing as a compatibility fallback for tests, unusual
+	// environments, or older `just` installations without --summary.
+	if sourceErr != nil {
+		return nil, sourceErr
+	}
+	if len(metadata) == 0 {
+		return nil, fmt.Errorf("list recipes with just: %w", listErr)
+	}
+	sort.SliceStable(metadata, func(i, j int) bool { return metadata[i].Name < metadata[j].Name })
+	return metadata, nil
+}
+
+func listAvailableRecipes(path string) ([]string, error) {
+	cmd := exec.Command("just", "--justfile", path, "--summary", "--unsorted")
+	cmd.Dir = filepath.Dir(path)
+	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	return strings.Fields(string(output)), nil
+}
+
+func parseSource(path string) ([]Recipe, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
 	var recipes []Recipe
 	var comments []string
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(file)
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
@@ -79,8 +128,8 @@ func Parse(path string) ([]Recipe, error) {
 			continue
 		}
 
-		// Attributes such as [group('dev')] and [private] belong to the recipe
-		// on the next line, so keep any preceding description comments.
+		// Attributes belong to the declaration on the next line, so keep any
+		// preceding description comments intact.
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			continue
 		}
@@ -100,22 +149,16 @@ func Parse(path string) ([]Recipe, error) {
 			comments = nil
 			continue
 		}
-		params := strings.Fields(strings.TrimSpace(match[2]))
 		recipes = append(recipes, Recipe{
 			Name:        match[1],
 			Description: strings.TrimSpace(strings.Join(comments, " ")),
-			Parameters:  params,
+			Parameters:  strings.Fields(strings.TrimSpace(match[2])),
 			SourceLine:  lineNo,
 		})
 		comments = nil
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
-	}
-
-	sort.SliceStable(recipes, func(i, j int) bool { return recipes[i].Name < recipes[j].Name })
-	if len(recipes) == 0 {
-		return nil, fmt.Errorf("no recipes found in %s", path)
 	}
 	return recipes, nil
 }
