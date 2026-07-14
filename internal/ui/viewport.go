@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/iOSDeveloperGuy/jui/internal/justfile"
 )
 
 const (
-	defaultTerminalRows       = 24
-	defaultTerminalColumns    = selectedRowWidth + 1
-	reservedScreenRows        = 5
-	minimumDescriptionWidth   = 12
-	minimumCompactNameWidth   = 8
+	defaultTerminalRows     = 24
+	defaultTerminalColumns  = selectedRowWidth + 1
+	reservedScreenRows      = 5
+	minimumDescriptionWidth = 12
+	minimumCompactNameWidth = 8
 )
 
 func terminalDimensions() (rows, columns int) {
