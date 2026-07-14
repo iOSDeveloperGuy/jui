@@ -19,6 +19,7 @@ const (
 	runNotStarted runResult = iota
 	runSucceeded
 	runFailed
+	runStopped
 )
 
 type App struct {
@@ -169,10 +170,14 @@ func (a *App) execute(recipe justfile.Recipe) {
 	start := time.Now()
 	cmd := justfile.Run(a.path, recipe.Name, nil)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err := cmd.Run()
+	err, interrupted := runCommand(cmd)
 	duration := time.Since(start).Round(time.Millisecond)
 	failed := false
-	if exitErr, ok := err.(*exec.ExitError); ok {
+
+	if exitErr, ok := err.(*exec.ExitError); interrupted || (ok && exitErr.ExitCode() == 130) {
+		a.status = fmt.Sprintf("%s stopped after %s", recipe.Name, duration)
+		a.results[recipe.Name] = runStopped
+	} else if ok {
 		a.status = fmt.Sprintf("%s failed with exit code %d after %s", recipe.Name, exitErr.ExitCode(), duration)
 		a.results[recipe.Name] = runFailed
 		failed = true
@@ -218,6 +223,8 @@ func (a *App) render() {
 			marker = "✓"
 		case runFailed:
 			marker = "✗"
+		case runStopped:
+			marker = "■"
 		}
 		row := fmt.Sprintf(" %s %-24s %s", marker, r.Name, desc)
 		if len(row) > selectedRowWidth {
@@ -232,6 +239,8 @@ func (a *App) render() {
 			fmt.Printf(" \x1b[1;32m✓\x1b[0m %-24s %s\n", r.Name, desc)
 		case runFailed:
 			fmt.Printf(" \x1b[1;31m✗\x1b[0m %-24s %s\n", r.Name, desc)
+		case runStopped:
+			fmt.Printf(" \x1b[1;33m■\x1b[0m %-24s %s\n", r.Name, desc)
 		default:
 			fmt.Printf("   %-24s %s\n", r.Name, desc)
 		}
