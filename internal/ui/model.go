@@ -13,6 +13,14 @@ import (
 
 const selectedRowWidth = 96
 
+type runResult int
+
+const (
+	runNotStarted runResult = iota
+	runSucceeded
+	runFailed
+)
+
 type App struct {
 	path     string
 	recipes  []justfile.Recipe
@@ -20,6 +28,7 @@ type App struct {
 	selected int
 	query    string
 	status   string
+	results  map[string]runResult
 }
 
 func New(path string, recipes []justfile.Recipe) *App {
@@ -28,6 +37,7 @@ func New(path string, recipes []justfile.Recipe) *App {
 		recipes: recipes,
 		visible: append([]justfile.Recipe(nil), recipes...),
 		status:  "type to search  ↑/↓ select  enter run  esc clear/quit  ctrl-c quit",
+		results: make(map[string]runResult),
 	}
 }
 
@@ -164,12 +174,15 @@ func (a *App) execute(recipe justfile.Recipe) {
 	failed := false
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		a.status = fmt.Sprintf("%s failed with exit code %d after %s", recipe.Name, exitErr.ExitCode(), duration)
+		a.results[recipe.Name] = runFailed
 		failed = true
 	} else if err != nil {
 		a.status = fmt.Sprintf("%s failed: %v", recipe.Name, err)
+		a.results[recipe.Name] = runFailed
 		failed = true
 	} else {
 		a.status = fmt.Sprintf("%s completed in %s", recipe.Name, duration)
+		a.results[recipe.Name] = runSucceeded
 	}
 
 	fmt.Printf("\n%s\n", a.status)
@@ -199,14 +212,28 @@ func (a *App) render() {
 		if desc == "" {
 			desc = "No description"
 		}
-		row := fmt.Sprintf("  %-24s %s", r.Name, desc)
+		marker := " "
+		switch a.results[r.Name] {
+		case runSucceeded:
+			marker = "✓"
+		case runFailed:
+			marker = "✗"
+		}
+		row := fmt.Sprintf(" %s %-24s %s", marker, r.Name, desc)
 		if len(row) > selectedRowWidth {
 			row = row[:selectedRowWidth]
 		}
 		if i == a.selected {
 			fmt.Printf("\x1b[1;7m %-*s \x1b[0m\n", selectedRowWidth, strings.TrimSpace(row))
-		} else {
-			fmt.Printf("%-*s\n", selectedRowWidth+2, row)
+			continue
+		}
+		switch a.results[r.Name] {
+		case runSucceeded:
+			fmt.Printf(" \x1b[1;32m✓\x1b[0m %-24s %s\n", r.Name, desc)
+		case runFailed:
+			fmt.Printf(" \x1b[1;31m✗\x1b[0m %-24s %s\n", r.Name, desc)
+		default:
+			fmt.Printf("   %-24s %s\n", r.Name, desc)
 		}
 	}
 	fmt.Printf("\n\x1b[2m%s\x1b[0m", a.status)
