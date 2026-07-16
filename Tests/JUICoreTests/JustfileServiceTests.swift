@@ -7,7 +7,7 @@ final class JustfileServiceTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let nested = root.appendingPathComponent("a/b/c")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
-        let justfile = root.appendingPathComponent("Justfile")
+        let justfile = root.appendingPathComponent("justfile")
         try "test:\n\techo test\n".write(to: justfile, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: root) }
 
