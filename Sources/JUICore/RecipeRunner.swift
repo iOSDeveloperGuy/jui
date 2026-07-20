@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 
 #if canImport(Darwin)
 import Darwin
@@ -18,7 +19,22 @@ public struct RecipeExecution: Equatable {
     }
 }
 
-private func handleInterruptWithoutExiting(_ signalNumber: Int32) {}
+private final class InterruptState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var interrupted = false
+
+    func markInterrupted() {
+        lock.lock()
+        interrupted = true
+        lock.unlock()
+    }
+
+    var wasInterrupted: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return interrupted
+    }
+}
 
 public enum RecipeRunner {
     public static func run(
@@ -35,16 +51,36 @@ public enum RecipeRunner {
         process.standardError = FileHandle.standardError
 
         let started = ContinuousClock.now
+        let interruptState = InterruptState()
 
-        // Ensure the child starts with normal SIGINT behavior. Installing jui's
-        // handler before Process.run() can cause the spawned process tree to
-        // inherit an ignored interrupt on some platforms.
+        // Start the child with the normal SIGINT disposition. Once it is
+        // running, jui ignores SIGINT itself and forwards each interrupt to the
+        // launched Process, which also targets its subtasks.
         let previousHandler = signal(SIGINT, SIG_DFL)
-        defer { _ = signal(SIGINT, previousHandler) }
+        var interruptSource: DispatchSourceSignal?
+        defer {
+            interruptSource?.setEventHandler {}
+            interruptSource?.cancel()
+            _ = signal(SIGINT, previousHandler)
+        }
 
         do {
             try process.run()
-            _ = signal(SIGINT, handleInterruptWithoutExiting)
+
+            _ = signal(SIGINT, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(
+                signal: SIGINT,
+                queue: DispatchQueue.global(qos: .userInitiated)
+            )
+            source.setEventHandler {
+                interruptState.markInterrupted()
+                if process.isRunning {
+                    process.interrupt()
+                }
+            }
+            source.resume()
+            interruptSource = source
+
             process.waitUntilExit()
         } catch {
             let duration = formatDuration(started.duration(to: .now))
@@ -56,7 +92,9 @@ public enum RecipeRunner {
         }
 
         let duration = formatDuration(started.duration(to: .now))
-        if process.terminationReason == .uncaughtSignal || process.terminationStatus == 130 {
+        if interruptState.wasInterrupted
+            || process.terminationReason == .uncaughtSignal
+            || process.terminationStatus == 130 {
             return RecipeExecution(
                 result: .stopped,
                 status: "\(recipe.name) stopped after \(duration)",
