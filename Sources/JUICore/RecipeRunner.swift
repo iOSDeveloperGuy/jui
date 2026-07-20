@@ -35,11 +35,16 @@ public enum RecipeRunner {
         process.standardError = FileHandle.standardError
 
         let started = ContinuousClock.now
-        let previousHandler = signal(SIGINT, handleInterruptWithoutExiting)
+
+        // Ensure the child starts with normal SIGINT behavior. Installing jui's
+        // handler before Process.run() can cause the spawned process tree to
+        // inherit an ignored interrupt on some platforms.
+        let previousHandler = signal(SIGINT, SIG_DFL)
         defer { _ = signal(SIGINT, previousHandler) }
 
         do {
             try process.run()
+            _ = signal(SIGINT, handleInterruptWithoutExiting)
             process.waitUntilExit()
         } catch {
             let duration = formatDuration(started.duration(to: .now))
